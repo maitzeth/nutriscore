@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
-import { format, subDays, eachDayOfInterval } from 'date-fns'
+import { format, subDays, eachDayOfInterval, getDay } from 'date-fns'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
-import { Calendar, TrendingUp, Flame, Target, Lightbulb } from 'lucide-react'
+import { Calendar, TrendingUp, Flame, Target, Lightbulb, Download, MessageSquare } from 'lucide-react'
 import Header from '@/components/Header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Button } from '@/components/ui/Button'
@@ -9,7 +9,7 @@ import { useTracking } from '@/hooks/useTracking'
 import { getColorValue } from '@/lib/utils'
 import type { DayTracking } from '@/lib/utils'
 
-type DateRange = '7d' | '30d' | '90d' | 'custom'
+type DateRange = '7d' | '30d' | '90d'
 
 interface DateRangeOption {
   value: DateRange
@@ -32,6 +32,7 @@ interface Insight {
 export default function Reports() {
   const { isReady, getRangeTracking, getStreak } = useTracking()
   const [selectedRange, setSelectedRange] = useState<DateRange>('7d')
+  const [showNotes, setShowNotes] = useState(false)
 
   const days = dateRangeOptions.find(r => r.value === selectedRange)?.days || 7
 
@@ -60,13 +61,26 @@ export default function Reports() {
     const yellowPercent = totalDays > 0 ? Math.round((yellowDays / totalDays) * 100) : 0
     const redPercent = totalDays > 0 ? Math.round((redDays / totalDays) * 100) : 0
 
-    // Average score
     const avgScore = totalDays > 0
       ? trackings.reduce((sum, t) => sum + getColorValue(t.color), 0) / totalDays
       : 0
 
-    // Current streak
     const streak = getStreak()
+
+    // Best day(s)
+    const greenTrackings = trackings.filter(t => t.color === 'green')
+    const bestDays = greenTrackings.length > 0 
+      ? greenTrackings.map(t => t.date).slice(-3) 
+      : []
+
+    // Worst day(s)
+    const redTrackings = trackings.filter(t => t.color === 'red')
+    const worstDays = redTrackings.length > 0
+      ? redTrackings.map(t => t.date).slice(-3)
+      : []
+
+    // Notes count
+    const notesCount = trackings.filter(t => t.note && t.note.trim().length > 0).length
 
     return {
       totalDays,
@@ -79,6 +93,9 @@ export default function Reports() {
       avgScore: avgScore.toFixed(1),
       currentStreak: streak.current,
       bestStreak: streak.best,
+      bestDays,
+      worstDays,
+      notesCount,
     }
   }, [trackings, getStreak])
 
@@ -97,6 +114,7 @@ export default function Reports() {
         dayOfWeek: format(day, 'EEE'),
         value: tracking ? getColorValue(tracking.color) : null,
         color: tracking?.color || null,
+        note: tracking?.note || null,
       }
     })
   }, [days, trackingMap])
@@ -160,6 +178,12 @@ export default function Reports() {
             text: `You've declined ${Math.round(Math.abs(change))}% compared to last week.`,
             type: 'negative',
           })
+        } else {
+          result.push({
+            icon: '➡️',
+            text: `You're consistent — similar performance to last week.`,
+            type: 'neutral',
+          })
         }
       }
     }
@@ -199,8 +223,11 @@ export default function Reports() {
 
     // Day of week pattern
     const dayStats: Record<string, { total: number; green: number }> = {}
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    
     trackings.forEach(t => {
-      const day = format(new Date(t.date + 'T12:00:00'), 'EEEE')
+      const dayIdx = getDay(new Date(t.date + 'T12:00:00'))
+      const day = dayNames[dayIdx]
       if (!dayStats[day]) dayStats[day] = { total: 0, green: 0 }
       dayStats[day].total++
       if (t.color === 'green') dayStats[day].green++
@@ -220,8 +247,81 @@ export default function Reports() {
       })
     }
 
-    return result.slice(0, 5)
+    // Best day of week
+    const bestDayOfWeek = Object.entries(dayStats)
+      .filter(([_, s]) => s.total >= 2)
+      .sort((a, b) => (b[1].green / b[1].total) - (a[1].green / a[1].total))[0]
+
+    if (bestDayOfWeek && bestDayOfWeek[0] !== worstDay?.[0]) {
+      const [day, s] = bestDayOfWeek
+      const greenRate = Math.round((s.green / s.total) * 100)
+      result.push({
+        icon: '✨',
+        text: `${day}s are your best days (${greenRate}% success rate)!`,
+        type: 'positive',
+      })
+    }
+
+    // Notes insight
+    if (stats.notesCount > 0) {
+      result.push({
+        icon: '📝',
+        text: `You've added notes to ${stats.notesCount} day${stats.notesCount !== 1 ? 's' : ''}. Keep journaling!`,
+        type: 'neutral',
+      })
+    }
+
+    // No red days
+    if (stats.redDays === 0 && stats.totalDays > 0) {
+      result.push({
+        icon: '🎉',
+        text: `No bad days this period! Incredible discipline!`,
+        type: 'positive',
+      })
+    }
+
+    // Motivational
+    const avgScoreNum = parseFloat(stats.avgScore)
+    if (avgScoreNum >= 2.5) {
+      result.push({
+        icon: '💎',
+        text: `Your average score is ${stats.avgScore}/3 — you're crushing it!`,
+        type: 'positive',
+      })
+    } else if (avgScoreNum < 1.5 && stats.totalDays > 0) {
+      result.push({
+        icon: '💪',
+        text: `Average score is ${stats.avgScore}/3. Small changes lead to big results!`,
+        type: 'negative',
+      })
+    }
+
+    return result.slice(0, 6)
   }, [stats, weeklyData, trackings])
+
+  // Export function
+  const handleExport = useCallback(() => {
+    const exportData = {
+      exportDate: new Date().toISOString(),
+      dateRange: { start: startDate, end: endDate },
+      summary: stats,
+      dailyData: trackings.map(t => ({
+        date: t.date,
+        color: t.color,
+        note: t.note || '',
+      })),
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `nutriscore-export-${format(new Date(), 'yyyy-MM-dd')}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }, [trackings, stats, startDate, endDate])
 
   const handleRangeChange = useCallback((range: DateRange) => {
     setSelectedRange(range)
@@ -230,8 +330,8 @@ export default function Reports() {
   if (!isReady) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4">📊</div>
+        <div className="text-center animate-fade-in">
+          <div className="text-6xl mb-4 animate-bounce">📊</div>
           <p className="text-muted-foreground">Loading reports...</p>
         </div>
       </div>
@@ -243,17 +343,29 @@ export default function Reports() {
       <Header />
       
       <main className="flex-1 container mx-auto px-4 py-8">
-        <h1 className="text-2xl font-bold mb-6 flex items-center gap-2">
-          <span>📊</span> Reports
-        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <h1 className="text-2xl font-bold flex items-center gap-2 animate-fade-in">
+            <span>📊</span> Reports
+          </h1>
+          
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            className="flex items-center gap-2 transition-all duration-200 hover:scale-105 active:scale-95"
+          >
+            <Download className="h-4 w-4" />
+            Export Data
+          </Button>
+        </div>
 
         {/* Date Range Selector */}
-        <div className="flex flex-wrap gap-2 mb-8">
+        <div className="flex flex-wrap gap-2 mb-8 animate-fade-in-up">
           {dateRangeOptions.map(option => (
             <Button
               key={option.value}
               variant={selectedRange === option.value ? 'default' : 'outline'}
               onClick={() => handleRangeChange(option.value)}
+              className="transition-all duration-200"
             >
               {option.label}
             </Button>
@@ -262,7 +374,7 @@ export default function Reports() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <Card>
+          <Card className="animate-fade-in-up" style={{ animationDelay: '0ms' }}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Calendar className="h-4 w-4" />
@@ -274,7 +386,7 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="animate-fade-in-up" style={{ animationDelay: '50ms' }}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Target className="h-4 w-4 text-green-500" />
@@ -291,7 +403,7 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="animate-fade-in-up" style={{ animationDelay: '100ms' }}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <Flame className="h-4 w-4 text-orange-500" />
@@ -306,7 +418,7 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="animate-fade-in-up" style={{ animationDelay: '150ms' }}>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
                 <TrendingUp className="h-4 w-4" />
@@ -323,24 +435,24 @@ export default function Reports() {
         </div>
 
         {/* Color Distribution */}
-        <Card className="mb-8">
+        <Card className="mb-8 animate-fade-in-up" style={{ animationDelay: '200ms' }}>
           <CardHeader>
             <CardTitle className="text-lg">Color Distribution</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex h-4 rounded-full overflow-hidden">
               <div
-                className="bg-green-500 transition-all"
+                className="bg-green-500 transition-all duration-500"
                 style={{ width: `${stats.greenPercent}%` }}
                 title={`Green: ${stats.greenDays} days (${stats.greenPercent}%)`}
               />
               <div
-                className="bg-yellow-400 transition-all"
+                className="bg-yellow-400 transition-all duration-500"
                 style={{ width: `${stats.yellowPercent}%` }}
                 title={`Yellow: ${stats.yellowDays} days (${stats.yellowPercent}%)`}
               />
               <div
-                className="bg-red-500 transition-all"
+                className="bg-red-500 transition-all duration-500"
                 style={{ width: `${stats.redPercent}%` }}
                 title={`Red: ${stats.redDays} days (${stats.redPercent}%)`}
               />
@@ -363,7 +475,7 @@ export default function Reports() {
         </Card>
 
         {/* Trend Chart */}
-        <Card className="mb-8">
+        <Card className="mb-8 animate-fade-in-up" style={{ animationDelay: '250ms' }}>
           <CardHeader>
             <CardTitle className="text-lg">Trend</CardTitle>
           </CardHeader>
@@ -399,7 +511,7 @@ export default function Reports() {
                       if (active && payload && payload.length) {
                         const data = payload[0].payload
                         return (
-                          <div className="bg-background border rounded-lg p-3 shadow-lg">
+                          <div className="bg-background border rounded-lg p-3 shadow-lg animate-fade-in">
                             <p className="font-medium">{data.date}</p>
                             <p className="text-sm text-muted-foreground">
                               {data.color === 'green' && '🟢 Great day'}
@@ -407,6 +519,11 @@ export default function Reports() {
                               {data.color === 'red' && '🔴 Bad day'}
                               {!data.color && '⚪ No data'}
                             </p>
+                            {data.note && (
+                              <p className="text-xs text-muted-foreground mt-1 max-w-[200px] truncate">
+                                📝 {data.note}
+                              </p>
+                            )}
                           </div>
                         )
                       }
@@ -435,7 +552,7 @@ export default function Reports() {
 
         {/* Weekly Comparison */}
         {weeklyData.length > 1 && (
-          <Card className="mb-8">
+          <Card className="mb-8 animate-fade-in-up" style={{ animationDelay: '300ms' }}>
             <CardHeader>
               <CardTitle className="text-lg">Weekly Comparison</CardTitle>
             </CardHeader>
@@ -447,7 +564,7 @@ export default function Reports() {
                     <div className="flex-1">
                       <div className="h-6 bg-muted rounded-full overflow-hidden">
                         <div
-                          className="h-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500 rounded-full transition-all"
+                          className="h-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500 rounded-full transition-all duration-700"
                           style={{ width: `${(week.avg / 3) * 100}%` }}
                         />
                       </div>
@@ -462,8 +579,47 @@ export default function Reports() {
           </Card>
         )}
 
+        {/* Notes Section */}
+        {stats.notesCount > 0 && (
+          <Card className="mb-8 animate-fade-in-up" style={{ animationDelay: '350ms' }}>
+            <CardHeader
+              className="cursor-pointer select-none"
+              onClick={() => setShowNotes(!showNotes)}
+            >
+              <CardTitle className="text-lg flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5" />
+                  Notes ({stats.notesCount})
+                </div>
+                <span className="text-muted-foreground text-sm">
+                  {showNotes ? '▲ Hide' : '▼ Show'}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            {showNotes && (
+              <CardContent className="animate-fade-in-up">
+                <div className="space-y-3">
+                  {trackings
+                    .filter(t => t.note && t.note.trim().length > 0)
+                    .reverse()
+                    .slice(0, 10)
+                    .map((t) => (
+                      <div key={t.date} className="flex gap-3 p-3 rounded-lg bg-muted/50">
+                        <div className="text-sm font-medium text-muted-foreground whitespace-nowrap">
+                          {format(new Date(t.date + 'T12:00:00'), 'MMM dd')}
+                        </div>
+                        <div className="text-sm">{t.note}</div>
+                      </div>
+                    ))
+                  }
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )}
+
         {/* Insights */}
-        <Card>
+        <Card className="animate-fade-in-up" style={{ animationDelay: '400ms' }}>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
               <Lightbulb className="h-5 w-5 text-yellow-500" />
@@ -476,7 +632,8 @@ export default function Reports() {
                 {insights.map((insight, idx) => (
                   <li
                     key={idx}
-                    className="flex items-start gap-3 p-3 rounded-lg bg-muted/50"
+                    className="flex items-start gap-3 p-3 rounded-lg bg-muted/50 transition-all duration-200 hover:bg-muted"
+                    style={{ animationDelay: `${idx * 50}ms` }}
                   >
                     <span className="text-xl">{insight.icon}</span>
                     <span className={`text-sm ${
