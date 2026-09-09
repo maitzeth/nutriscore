@@ -1,0 +1,18 @@
+project:
+  name: nutriscore
+  description: "Food habit tracker with color-coded calendar and reports"
+  
+artifact_store: openspec
+
+sdd:
+  execution_mode: auto
+  chained_pr_strategy: single-pr-default
+  review_budget: 400
+  strict_tdd: false
+
+tech_stack:
+  framework: react-19
+  styling: tailwindcss
+  components: shadcn-ui
+  database: sqlite (via sql.js for browser)
+  language: typescript
