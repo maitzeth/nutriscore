@@ -33,17 +33,59 @@ This is a personal tool for tracking daily diet quality. No calorie counting, no
 - **Offline-first**: Works without internet after initial load
 - **Export**: Download your data as JSON anytime
 
-## 🛠️ Tech Stack
+
+
+## 🏗️ Architecture
+
+### How SQLite Works in the Browser
+
+This app uses **[sql.js](https://sql.js.org/)** — a JavaScript implementation of SQLite compiled to WebAssembly. This means SQLite runs entirely in the browser with **no backend required**.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Browser                                                     │
+│                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐  │
+│  │  React App   │───▶│  sql.js     │───▶│  SQLite in      │  │
+│  │  (queries)   │    │  (WASM)     │    │  Memory         │  │
+│  └─────────────┘    └─────────────┘    └────────┬────────┘  │
+│                                                  │           │
+│                                          ┌───────▼────────┐  │
+│                                          │  localStorage   │  │
+│                                          │  (persistence)  │  │
+│                                          └────────────────┘  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+
+1. **Initialization**: sql.js loads the SQLite WASM module (~600KB)
+2. **Load from storage**: On app start, check `localStorage` for saved DB
+3. **Restore**: Deserialize the base64 string back into a SQLite database in memory
+4. **Query**: All reads/writes happen against the in-memory database (fast!)
+5. **Persist**: After each write, export the entire DB to base64 and save to `localStorage`
+
+**Why this approach?**
+- ✅ Full SQL power (JOINs, indexes, transactions) in the browser
+- ✅ No server/API needed — works offline
+- ✅ Data stays on user's device (privacy)
+- ✅ Same SQL syntax as a real SQLite backend
+
+**Limitations:**
+- ⚠️ `localStorage` has ~5-10MB limit (enough for years of daily tracking)
+- ⚠️ Clearing browser data deletes everything (use Export to backup!)
+- ⚠️ No sync between devices
+- ⚠️ DB is serialized/deserialized on every write (acceptable for small DBs)
+
+### Tech Stack
 
 - **Framework**: React 19 + TypeScript
 - **Build**: Vite
 - **Styling**: Tailwind CSS v4
 - **Components**: shadcn/ui style
-- **Database**: SQLite (sql.js) with localStorage persistence
+- **Database**: SQLite via sql.js (WebAssembly) with localStorage persistence
 - **Charts**: Recharts
 - **Icons**: Lucide React
-
-## 📦 Installation
 
 ```bash
 # Clone the repository
