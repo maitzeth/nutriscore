@@ -9,18 +9,19 @@ import { useTracking } from '@/hooks/useTracking'
 import { getColorValue } from '@/lib/utils'
 import type { DayTracking } from '@/lib/utils'
 
-type DateRange = '7d' | '30d' | '90d'
+type DateRange = '7d' | '30d' | '90d' | 'custom'
 
 interface DateRangeOption {
   value: DateRange
   label: string
-  days: number
+  days?: number
 }
 
 const dateRangeOptions: DateRangeOption[] = [
   { value: '7d', label: 'Last 7 days', days: 7 },
   { value: '30d', label: 'Last 30 days', days: 30 },
   { value: '90d', label: 'Last 90 days', days: 90 },
+  { value: 'custom', label: 'Custom Range' },
 ]
 
 interface Insight {
@@ -33,11 +34,13 @@ export default function Reports() {
   const { isReady, getRangeTracking, getStreak } = useTracking()
   const [selectedRange, setSelectedRange] = useState<DateRange>('7d')
   const [showNotes, setShowNotes] = useState(false)
+  const [customStartDate, setCustomStartDate] = useState(format(subDays(new Date(), 6), 'yyyy-MM-dd'))
+  const [customEndDate, setCustomEndDate] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const days = dateRangeOptions.find(r => r.value === selectedRange)?.days || 7
 
-  const endDate = format(new Date(), 'yyyy-MM-dd')
-  const startDate = format(subDays(new Date(), days - 1), 'yyyy-MM-dd')
+  const endDate = selectedRange === 'custom' ? customEndDate : format(new Date(), 'yyyy-MM-dd')
+  const startDate = selectedRange === 'custom' ? customStartDate : format(subDays(new Date(), days - 1), 'yyyy-MM-dd')
 
   const trackings = useMemo(() => {
     if (!isReady) return []
@@ -50,7 +53,6 @@ export default function Reports() {
     return map
   }, [trackings])
 
-  // Calculate stats
   const stats = useMemo(() => {
     const totalDays = trackings.length
     const greenDays = trackings.filter(t => t.color === 'green').length
@@ -67,19 +69,16 @@ export default function Reports() {
 
     const streak = getStreak()
 
-    // Best day(s)
     const greenTrackings = trackings.filter(t => t.color === 'green')
     const bestDays = greenTrackings.length > 0 
       ? greenTrackings.map(t => t.date).slice(-3) 
       : []
 
-    // Worst day(s)
     const redTrackings = trackings.filter(t => t.color === 'red')
     const worstDays = redTrackings.length > 0
       ? redTrackings.map(t => t.date).slice(-3)
       : []
 
-    // Notes count
     const notesCount = trackings.filter(t => t.note && t.note.trim().length > 0).length
 
     return {
@@ -99,7 +98,6 @@ export default function Reports() {
     }
   }, [trackings, getStreak])
 
-  // Chart data
   const chartData = useMemo(() => {
     const allDays = eachDayOfInterval({
       start: subDays(new Date(), days - 1),
@@ -119,7 +117,6 @@ export default function Reports() {
     })
   }, [days, trackingMap])
 
-  // Weekly comparison
   const weeklyData = useMemo(() => {
     const weeks: { week: string; avg: number; count: number }[] = []
     
@@ -145,7 +142,6 @@ export default function Reports() {
     return weeks
   }, [days, trackings])
 
-  // Insights
   const insights: Insight[] = useMemo(() => {
     const result: Insight[] = []
     
@@ -158,7 +154,6 @@ export default function Reports() {
       return result
     }
 
-    // Trend
     if (weeklyData.length >= 2) {
       const latestWeek = weeklyData[weeklyData.length - 1]
       const previousWeek = weeklyData[weeklyData.length - 2]
@@ -188,7 +183,6 @@ export default function Reports() {
       }
     }
 
-    // Streak
     if (stats.currentStreak > 0) {
       result.push({
         icon: '🔥',
@@ -197,7 +191,6 @@ export default function Reports() {
       })
     }
 
-    // Best streak
     if (stats.bestStreak > 0) {
       result.push({
         icon: '🏆',
@@ -206,7 +199,6 @@ export default function Reports() {
       })
     }
 
-    // Color distribution insight
     if (stats.greenPercent > 70) {
       result.push({
         icon: '🌟',
@@ -221,7 +213,6 @@ export default function Reports() {
       })
     }
 
-    // Day of week pattern
     const dayStats: Record<string, { total: number; green: number }> = {}
     const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     
@@ -234,7 +225,7 @@ export default function Reports() {
     })
 
     const worstDay = Object.entries(dayStats)
-      .filter(([_, s]) => s.total >= 2)
+      .filter(([, s]) => s.total >= 2)
       .sort((a, b) => (a[1].green / a[1].total) - (b[1].green / b[1].total))[0]
 
     if (worstDay) {
@@ -247,9 +238,8 @@ export default function Reports() {
       })
     }
 
-    // Best day of week
     const bestDayOfWeek = Object.entries(dayStats)
-      .filter(([_, s]) => s.total >= 2)
+      .filter(([, s]) => s.total >= 2)
       .sort((a, b) => (b[1].green / b[1].total) - (a[1].green / a[1].total))[0]
 
     if (bestDayOfWeek && bestDayOfWeek[0] !== worstDay?.[0]) {
@@ -262,7 +252,6 @@ export default function Reports() {
       })
     }
 
-    // Notes insight
     if (stats.notesCount > 0) {
       result.push({
         icon: '📝',
@@ -271,7 +260,6 @@ export default function Reports() {
       })
     }
 
-    // No red days
     if (stats.redDays === 0 && stats.totalDays > 0) {
       result.push({
         icon: '🎉',
@@ -280,7 +268,6 @@ export default function Reports() {
       })
     }
 
-    // Motivational
     const avgScoreNum = parseFloat(stats.avgScore)
     if (avgScoreNum >= 2.5) {
       result.push({
@@ -299,7 +286,6 @@ export default function Reports() {
     return result.slice(0, 6)
   }, [stats, weeklyData, trackings])
 
-  // Export function
   const handleExport = useCallback(() => {
     const exportData = {
       exportDate: new Date().toISOString(),
@@ -359,17 +345,55 @@ export default function Reports() {
         </div>
 
         {/* Date Range Selector */}
-        <div className="flex flex-wrap gap-2 mb-8 animate-fade-in-up">
-          {dateRangeOptions.map(option => (
-            <Button
-              key={option.value}
-              variant={selectedRange === option.value ? 'default' : 'outline'}
-              onClick={() => handleRangeChange(option.value)}
-              className="transition-all duration-200"
-            >
-              {option.label}
-            </Button>
-          ))}
+        <div className="mb-8 animate-fade-in-up">
+          <div className="flex flex-wrap gap-2 mb-4">
+            {dateRangeOptions.map(option => (
+              <Button
+                key={option.value}
+                variant={selectedRange === option.value ? 'default' : 'outline'}
+                onClick={() => handleRangeChange(option.value)}
+                className="transition-all duration-200"
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+          
+          {/* Custom Date Range Inputs */}
+          {selectedRange === 'custom' && (
+            <div className="flex flex-wrap items-center gap-4 p-4 bg-muted/50 rounded-lg animate-fade-in-up">
+              <div className="flex items-center gap-2">
+                <label htmlFor="start-date" className="text-sm font-medium text-muted-foreground">
+                  From:
+                </label>
+                <input
+                  type="date"
+                  id="start-date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  max={customEndDate}
+                  className="px-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label htmlFor="end-date" className="text-sm font-medium text-muted-foreground">
+                  To:
+                </label>
+                <input
+                  type="date"
+                  id="end-date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  min={customStartDate}
+                  max={format(new Date(), 'yyyy-MM-dd')}
+                  className="px-3 py-2 text-sm rounded-md border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <span className="text-sm text-muted-foreground">
+                {Math.ceil((new Date(customEndDate).getTime() - new Date(customStartDate).getTime()) / (1000 * 60 * 60 * 24)) + 1} days selected
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Summary Cards */}
